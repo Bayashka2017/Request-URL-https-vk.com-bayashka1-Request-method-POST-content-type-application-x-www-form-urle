@@ -2,7 +2,6 @@ import '../lib/logging/main/install'
 
 import { app, Menu, ipcMain, BrowserWindow, shell } from 'electron'
 import * as Fs from 'fs'
-import * as URL from 'url'
 
 import { MenuLabelsEvent } from '../models/menu-labels'
 
@@ -71,22 +70,6 @@ function getExtraErrorContext(): Record<string, string> {
     uptime: getUptimeInSeconds().toFixed(3),
     time: new Date().toString(),
   }
-}
-
-/** Extra argument for the protocol launcher on Windows */
-const protocolLauncherArg = '--protocol-launcher'
-
-const possibleProtocols = new Set(['x-github-client'])
-if (__DEV__) {
-  possibleProtocols.add('x-github-desktop-dev-auth')
-} else {
-  possibleProtocols.add('x-github-desktop-auth')
-}
-// Also support Desktop Classic's protocols.
-if (__DARWIN__) {
-  possibleProtocols.add('github-mac')
-} else if (__WIN32__) {
-  possibleProtocols.add('github-windows')
 }
 
 process.on('uncaughtException', (error: Error) => {
@@ -206,23 +189,12 @@ function handlePossibleProtocolLauncherArgs(args: ReadonlyArray<string>) {
 
   if (__WIN32__) {
     // Desktop registers it's protocol handler callback on Windows as
-    // `[executable path] --protocol-launcher "%1"`. Note that extra command
-    // line arguments might be added by Chromium
-    // (https://electronjs.org/docs/api/app#event-second-instance).
-    // At launch Desktop checks for that exact scenario here before doing any
-    // processing. If there's more than one matching url argument because of a
+    // `[executable path] --protocol-launcher "%1"`. At launch it checks
+    // for that exact scenario here before doing any processing, and only
+    // processing the first argument. If there's more than 3 args because of a
     // malformed or untrusted url then we bail out.
-
-    const matchingUrls = args.filter(arg => {
-      const url = URL.parse(arg)
-      // i think this `slice` is just removing a trailing `:`
-      return url.protocol && possibleProtocols.has(url.protocol.slice(0, -1))
-    })
-
-    if (args.includes(protocolLauncherArg) && matchingUrls.length === 1) {
-      handleAppURL(matchingUrls[0])
-    } else {
-      log.error(`Malformed launch arguments received: ${args}`)
+    if (args.length === 3 && args[1] === '--protocol-launcher') {
+      handleAppURL(args[2])
     }
   } else if (args.length > 1) {
     handleAppURL(args[1])
@@ -236,7 +208,7 @@ function handlePossibleProtocolLauncherArgs(args: ReadonlyArray<string>) {
 function setAsDefaultProtocolClient(protocol: string) {
   if (__WIN32__) {
     app.setAsDefaultProtocolClient(protocol, process.execPath, [
-      protocolLauncherArg,
+      '--protocol-launcher',
     ])
   } else {
     app.setAsDefaultProtocolClient(protocol)
@@ -257,7 +229,20 @@ app.on('ready', () => {
 
   readyTime = now() - launchTime
 
-  possibleProtocols.forEach(protocol => setAsDefaultProtocolClient(protocol))
+  setAsDefaultProtocolClient('x-github-client')
+
+  if (__DEV__) {
+    setAsDefaultProtocolClient('x-github-desktop-dev-auth')
+  } else {
+    setAsDefaultProtocolClient('x-github-desktop-auth')
+  }
+
+  // Also support Desktop Classic's protocols.
+  if (__DARWIN__) {
+    setAsDefaultProtocolClient('github-mac')
+  } else if (__WIN32__) {
+    setAsDefaultProtocolClient('github-windows')
+  }
 
   createWindow()
 
